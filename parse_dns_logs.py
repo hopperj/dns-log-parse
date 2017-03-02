@@ -14,7 +14,7 @@ import shutil
 import numpy as np
 import warnings
 import pprint
-
+import geoip2.database
 
 
 warnings.filterwarnings("ignore")
@@ -64,7 +64,7 @@ def run(ctx, log_level, log, db_uri, dns_in, dns_archive, geoip, fake):
     db_uri = json.loads(db_uri)
 
     ctx.obj.db_uri = db_uri
-    ctx.obj.geoip = geoip
+    ctx.obj.geoip_loc = geoip
     
     # Connect to the database
     db_con = pymysql.connect( **db_uri  )
@@ -73,17 +73,24 @@ def run(ctx, log_level, log, db_uri, dns_in, dns_archive, geoip, fake):
     logging.debug('Using new fname: %s'%new_dns_in)
     data = parse_log( ctx, new_dns_in )
     archive(ctx, new_dns_in)
+    logging.debug('Data archived')
     if not data:
         logging.info('Log is empty')
     else:
         logging.debug('Found %d data'%len(data))
         insert_data( ctx, data, db_cur )
+        logging.debug('data inserted')
         firewall_traffic( ctx, data, db_cur )
+        logging.debug('data filtering complete')
+
+    geoip_update(ctx, db_cur, data)
+    logging.debug('geoip update complete')
     if fake:
         db_con.rollback()
     else:
         db_con.commit()
     db_con.close()
+
 
 
 
@@ -172,7 +179,7 @@ def insert_data(ctx, data, db_cur):
         d['recursive'],
         d['dns']
     )
-    
+    logging.debug('Beginning insertmany command')
     db_cur.executemany(
         "INSERT IGNORE query(timestamp, client, port, domain, query, class, type, recursive, dns) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s);",
         [
@@ -190,6 +197,7 @@ def insert_data(ctx, data, db_cur):
             for d in data
         ]
     )
+    logging.debug('insert many complete')
 
         
 def parse_log(ctx, fname):
@@ -238,23 +246,10 @@ def move_log_data(ctx, dns_in, dns_archive):
 
 
 
-
-
-def goip_update(ctx):
-    # Make a copy and change the target DB
-    db_uri = ctx.obj.db_uri
-    db_uri['database'] = 'ip_info'
-
-    db_con = pymysql.connect( **ctx.obj.db_uri  )
-    db_cur = db_con.cursor()
-    q = 'select distinct query.client from query left join ip_info on query.client=ip_info.ip where ip_info.ip IS NULL;'
-    db_cur.execute(q)
-    results = [ e[0] for e in db_cur.fetchall() ]
+def geoip_update(ctx, db_cur, data):
     reader = geoip2.database.Reader(ctx.obj.geoip_loc)
-
-    logging.info('Going to insert %d addresses'%(len(results)))
-    for result in results:
-        logging.debug('Inserting %s'%result)
+    # Check all unique IP addresses in the data (set ensures uniqueness)
+    for result in set([ d['client'] for d in data ]):
         try:
             res = reader.city(result)
             country = res.country.name.encode('latin-1', 'replace')
@@ -264,16 +259,6 @@ def goip_update(ctx):
             city = None
 
         db_cur.execute('REPLACE INTO ip_info(ip, country, city) VALUES(%s,%s,%s)',(result,country, city))
-
-    if not ctx.obj.fake:
-        db_con.commit()
-    else:
-        db_con.rollback()
-                
-
-
-
-
 
 
 

@@ -73,18 +73,16 @@ def run(ctx, log_level, log, db_uri, dns_in, dns_archive, geoip, fake):
     logging.debug('Using new fname: %s'%new_dns_in)
     data = parse_log( ctx, new_dns_in )
     archive(ctx, new_dns_in)
-    logging.debug('Data archived')
+
     if not data:
         logging.info('Log is empty')
     else:
         logging.debug('Found %d data'%len(data))
         insert_data( ctx, data, db_cur )
-        logging.debug('data inserted')
         firewall_traffic( ctx, data, db_cur )
-        logging.debug('data filtering complete')
 
     geoip_update(ctx, db_cur, data)
-    logging.debug('geoip update complete')
+
     if fake:
         db_con.rollback()
     else:
@@ -156,9 +154,6 @@ def firewall_traffic(ctx, data, db_cur):
                             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             domain
                         )
-
-                        #print(q)
-                        
                         if not ctx.obj.fake:
                             db_cur.execute(q)
                         
@@ -167,19 +162,6 @@ def firewall_traffic(ctx, data, db_cur):
         
 
 def insert_data(ctx, data, db_cur):
-    d = data[0]
-    q = "insert into query(timestamp, client, port, domain, query, class, type, recursive, dns) VALUES('%s','%s','%s','%s','%s','%s','%s','%s','%s')"%(
-        d['timestamp'],
-        d['client'],
-        d['port'],
-        d['domain'],
-        d['query'],
-        d['class'],
-        d['type'],
-        d['recursive'],
-        d['dns']
-    )
-    logging.debug('Beginning insertmany command')
     db_cur.executemany(
         "INSERT IGNORE query(timestamp, client, port, domain, query, class, type, recursive, dns) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s);",
         [
@@ -197,7 +179,6 @@ def insert_data(ctx, data, db_cur):
             for d in data
         ]
     )
-    logging.debug('insert many complete')
 
         
 def parse_log(ctx, fname):

@@ -15,6 +15,7 @@ import numpy as np
 import warnings
 import pprint
 import geoip2.database
+from glob import glob
 
 
 warnings.filterwarnings("ignore")
@@ -69,10 +70,12 @@ def run(ctx, log_level, log, db_uri, dns_in, dns_archive, geoip, fake):
     # Connect to the database
     db_con = pymysql.connect( **db_uri  )
     db_cur = db_con.cursor()
-    new_dns_in = move_log_data(ctx, dns_in, dns_archive)
-    logging.debug('Using new fname: %s'%new_dns_in)
-    data = parse_log( ctx, new_dns_in )
-    archive(ctx, new_dns_in)
+
+    data = move_log_data(ctx, dns_in, dns_archive)
+    logging.debug('Will now process %d entries'%len(data))
+    #logging.debug('Using new fname: %s'%new_dns)
+    #data = parse_log( ctx, raw_data )
+    #archive(ctx, new_dns)
 
     if not data:
         logging.info('Log is empty')
@@ -122,7 +125,6 @@ def firewall_traffic(ctx, data, db_cur):
         if dat['domain'] not in records[ dat['client'] ]:
             records[ dat['client'] ][ dat['domain'] ] = 0
         if dat['domain'] not in domains:
-            #print('Adding:',dat['domain'])
             domains[dat['domain']] = 0
 
         domains[dat['domain']] += 1
@@ -180,49 +182,68 @@ def insert_data(ctx, data, db_cur):
         ]
     )
 
+    ips = set([ e['client'] for e in data])
+    logging.info('Doing IP count updates')
+    for ip in ips:        
+        db_cur.execute("INSERT INTO ip_info VALUES('%s', 1, NOW()) ON DUPLICATE KEY UPDATE count=count+%d, lastseen=NOW();"%(ip, len([1 for e in data if e['client']==ip])))
         
 def parse_log(ctx, fname):
-    with open(fname) as f:
-        raw_data = [ l.split() for l in f.readlines() ]
-    data = [
-        {
-            'timestamp':datetime.datetime.strptime(e[0]+' '+e[1], '%d-%b-%Y %H:%M:%S.%f'),
-            'client':e[3].split('#')[0],
-            'port':int(e[3].split('#')[-1]),
-            'domain':e[4][1:-2],
-            'query':e[6],
-            'class':e[7],
-            'type':e[8],
-            'recursive':e[9],
-            'dns':e[10][1:-1]
-        }
-        for e in raw_data
-    ]
-
-    return data
-
-
+    pass
 
 
 def archive( ctx, dns_archive):
     os.system('gzip '+dns_archive)
 
 def move_log_data(ctx, dns_in, dns_archive):
-    #return dns_in
     new_fname = os.path.join(
         dns_archive,
         datetime.datetime.strftime( datetime.datetime.now(), "%Y-%m-%dT%H-%M-%S_dns_record.log" )
     )
-    if ctx.obj.fake:
-        new_fname = '/tmp/dns_query.log'
-        shutil.copy(dns_in, new_fname)
-    else:
-        #os.rename(dns_in, new_fname)
-        shutil.copy(dns_in, new_fname)
-        os.system('truncate -s 0 '+dns_in)
-        #os.system('touch '+dns_in)
-        #os.system('chown bind:bind '+dns_in)
-    return new_fname
+    if not ctx.obj.fake:
+        new_f = open( new_fname, 'w' )
+
+    data = []
+    fnames = glob(dns_in)
+    logging.debug('Will extract from %d files'%len(fnames))
+    #pp.pprint(fnames)
+    # Itterate through all files
+    for fname in fnames:
+        # Open files for reading
+        with open(fname) as f:
+            # Dump file contents to archive file
+            logging.info('Extracting %s'%fname)
+            if not ctx.obj.fake:
+                new_f.write(f.read())
+            f.seek(0)
+            raw_data = [ l.split() for l in f.readlines() ]
+            # Truncate main log file, delete others
+            if not ctx.obj.fake:
+                if fname.endswith('.log'):
+                    os.system('truncate -s 0 '+fname)
+                else:
+                    os.system('rm '+fname)
+
+            data += [
+                {
+                    'timestamp':datetime.datetime.strptime(e[0]+' '+e[1], '%d-%b-%Y %H:%M:%S.%f'),
+                    'client':e[3].split('#')[0],
+                    'port':int(e[3].split('#')[-1]),
+                    'domain':e[4][1:-2],
+                    'query':e[6],
+                    'class':e[7],
+                    'type':e[8],
+                    'recursive':e[9],
+                    'dns':e[10][1:-1]
+                }
+            for e in raw_data
+            ]
+
+    # Close and archive file
+    if not ctx.obj.fake:
+        new_f.close()
+        archive(ctx, new_fname)
+
+    return data
 
 
 
@@ -239,7 +260,7 @@ def geoip_update(ctx, db_cur, data):
             country = None
             city = None
 
-        db_cur.execute('REPLACE INTO ip_info(ip, country, city) VALUES(%s,%s,%s)',(result,country, city))
+        db_cur.execute('REPLACE INTO geo_info(ip, country, city) VALUES(%s,%s,%s)',(result,country, city))
 
 
 

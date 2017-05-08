@@ -68,8 +68,16 @@ def run(ctx, log_level, log, db_uri, fake):
     q = "INSERT IGNORE INTO daily_counts(date, count) VALUES('{:%Y-%m-%d}',(SELECT COUNT(client) from query WHERE DATE(timestamp)='{:%Y-%m-%d}'));".format(yesterday, yesterday)
     db_cur.execute(q)
 
-
+    # Track how many times each domain has been queried
     q = "REPLACE into domain_counts(domain, count) select domain, count(domain) from query group by domain;"
+    db_cur.execute(q)
+
+    # Track all clients who request only a single site
+    q = "REPLACE INTO single_domain_clients(ip, domain, count, lastseen) select client, max(query), count(query), max(timestamp) from query group by client having count(distinct(query))=1;"
+    db_cur.execute(q)
+
+    # Track all clients who have only made a single query
+    q = "REPLACE INTO single_query_clients(ip, domain, lastseen) SELECT client, max(query), max(timestamp) from query group by client having count(distinct(query))=1 and COUNT(client)=1"
     db_cur.execute(q)
 
     

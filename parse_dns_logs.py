@@ -254,13 +254,13 @@ def geoip_update(ctx, db_cur, data):
     for result in set([ d['client'] for d in data ]):
         try:
             res = reader.city(result)
-            country = res.country.name.encode('latin-1', 'replace')
-            city = res.city.name.encode('latin-1', 'replace')
+            country = res.country.name.encode('utf8', 'ignore').decode('utf8')
+            city = res.city.name.encode('utf8', 'ignore').decode('utf8')
+
+            db_cur.execute('REPLACE INTO geo_info(ip, country, city) VALUES(%s,%s,%s)',(result,country, city))
         except:
             country = None
             city = None
-
-        db_cur.execute('REPLACE INTO geo_info(ip, country, city) VALUES(%s,%s,%s)',(result,country, city))
 
 
 

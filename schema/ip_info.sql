@@ -2,14 +2,9 @@ drop table if exists ip_info;
 
 
 create table ip_info(
-       ip varchar(15),
+       ip inet,
        count int,
-       lastseen datetime
+       lastseen timestamp
 );
 
-create unique index ip_info_ip on ip_info(ip);
-
-
-/*
-insert into ip_info values('127.0.0.1',1,NOW()) on duplicate key update count=count+1, lastseen=NOW();
-*/
+CREATE UNiQUE INDEX ip_info_ip ON ip_info(ip);

@@ -3,6 +3,7 @@ drop table if exists daily_counts;
 create table daily_counts(
        date DATE,
        count INT,
-       UNIQUE (date,count)
+       UNIQUE (date,count),
+       server inet
 );
-ALTER TABLE daily_counts ADD INDEX (date);
+CREATE INDEX daily_counts_date ON daily_counts(date DESC);
